@@ -1,0 +1,28 @@
+{
+  "name": "vault-reader",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Read-only, offline-first phone reader for an Obsidian vault, served from an always-on PC.",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "demo": "node server/index.js --config config.demo.json",
+    "icons": "node scripts/make-icons.js"
+  },
+  "license": "MIT",
+  "keywords": ["obsidian", "pwa", "offline-first", "markdown", "tailscale", "reader"],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "compression": "^1.8.2",
+    "express": "^4.22.3",
+    "gray-matter": "^4.0.3",
+    "highlight.js": "^11.12.0",
+    "markdown-it": "^14.3.3",
+    "markdown-it-footnote": "^4.0.0",
+    "markdown-it-mark": "^4.0.0",
+    "sanitize-html": "^2.18.1"
+  }
+}

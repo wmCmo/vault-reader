@@ -1,0 +1,7 @@
+{
+  "vault": "example-vault",
+  "exclude": [],
+  "port": 4620,
+  "lang": "en",
+  "appName": "Vault"
+}

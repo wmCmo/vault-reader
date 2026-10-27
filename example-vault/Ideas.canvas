@@ -1,0 +1,10 @@
+{
+  "nodes": [
+    { "id": "g1", "type": "group", "label": "Weekend ideas", "x": -40, "y": -60, "width": 700, "height": 420 },
+    { "id": "t1", "type": "text", "text": "## Balcony herb wall\nVertical pockets for basil, mint and thyme.", "x": 0, "y": 0, "width": 300, "height": 140, "color": "4" },
+    { "id": "t2", "type": "text", "text": "**Rain barrel**\nCollect water from the gutter for the garden.", "x": 340, "y": 0, "width": 280, "height": 140, "color": "5" },
+    { "id": "f1", "type": "file", "file": "Projects/🌿 Garden Planner.md", "x": 0, "y": 180, "width": 300, "height": 120 },
+    { "id": "t3", "type": "text", "text": "Ask the neighbours about sharing a compost bin.", "x": 340, "y": 180, "width": 280, "height": 120, "color": "6" }
+  ],
+  "edges": []
+}

@@ -1,0 +1,8 @@
+{
+  "vault": "C:/path/to/your/vault",
+  "exclude": [],
+  "port": 4610,
+  "tailscaleHttpsPort": 10443,
+  "lang": "en",
+  "appName": "Vault"
+}

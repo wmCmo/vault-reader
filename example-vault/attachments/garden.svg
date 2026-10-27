@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 300" width="640" height="300">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#cfe8ff"/>
+      <stop offset="1" stop-color="#f4f8ec"/>
+    </linearGradient>
+  </defs>
+  <rect width="640" height="300" fill="url(#sky)"/>
+  <circle cx="540" cy="70" r="38" fill="#ffd36b"/>
+  <rect y="230" width="640" height="70" fill="#b98a5e"/>
+  <rect y="222" width="640" height="14" fill="#8e6a45"/>
+  <g>
+    <rect x="80" y="170" width="120" height="62" rx="8" fill="#c4683f"/>
+    <path d="M140 170 C140 120 110 100 100 80 M140 160 C150 110 180 100 190 75 M140 150 C140 110 140 90 142 60" stroke="#3f8a3a" stroke-width="6" fill="none" stroke-linecap="round"/>
+    <circle cx="112" cy="118" r="11" fill="#e2463b"/>
+    <circle cx="170" cy="105" r="12" fill="#e2463b"/>
+    <circle cx="150" cy="135" r="10" fill="#f0703d"/>
+  </g>
+  <g>
+    <rect x="260" y="185" width="110" height="47" rx="8" fill="#d0784a"/>
+    <ellipse cx="290" cy="165" rx="18" ry="26" fill="#56a64b" transform="rotate(-20 290 165)"/>
+    <ellipse cx="315" cy="155" rx="18" ry="30" fill="#4b9a42"/>
+    <ellipse cx="342" cy="165" rx="18" ry="26" fill="#5fb153" transform="rotate(20 342 165)"/>
+  </g>
+  <g>
+    <rect x="430" y="180" width="130" height="52" rx="8" fill="#c4683f"/>
+    <path d="M455 180 l10 -40 M480 180 l0 -55 M505 180 l-6 -45 M530 180 l8 -38" stroke="#6bb35f" stroke-width="10" stroke-linecap="round"/>
+  </g>
+</svg>
