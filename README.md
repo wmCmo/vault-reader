@@ -47,19 +47,33 @@ If you want to *read* your notes everywhere and keep writing on the desktop, thi
 
 ## How it works
 
-```
- ┌──────────── your PC ────────────┐            ┌──────────── phone ────────────┐
- │ Obsidian vault (Markdown files) │            │  PWA                           │
- │        │ scan + render          │  tailnet   │   ├─ IndexedDB: rendered notes │
- │ Node server  127.0.0.1:4610 ────┼── HTTPS ──▶│   ├─ Cache: images, PDFs      │
- │        ▲ tailscale serve :10443 │            │   └─ reads offline, syncs when │
- └─────────────────────────────────┘            │      the PC is reachable       │
-                                                └────────────────────────────────┘
+```mermaid
+flowchart LR
+  subgraph PC["💻 Your PC"]
+    V[("Obsidian vault<br/>Markdown files")] --> S["Node server · 127.0.0.1:4610<br/>resolve links · render · hash"]
+  end
+  subgraph Phone["📱 Your phone"]
+    A["Vault Reader PWA"] --> DB[("IndexedDB<br/>rendered notes")]
+    A --> C[("Cache Storage<br/>images · PDFs")]
+  end
+  S -- "tailscale serve<br/>HTTPS :10443, tailnet only" --> A
 ```
 
-1. The server scans the vault, resolves links, renders every note to sanitised HTML and hashes it.
-2. The phone fetches a manifest of hashes and downloads only what changed.
-3. Everything is stored locally, so reading never waits on the network.
+The server scans the vault, resolves links, renders every note to sanitised HTML and hashes it. The phone downloads only what changed and stores everything locally, so reading never waits on the network:
+
+```mermaid
+sequenceDiagram
+  participant P as 📱 Phone
+  participant S as 💻 PC server
+  P->>S: GET /api/manifest
+  S-->>P: every note's id and hash
+  P->>P: compare with the stored hashes
+  loop changed notes, batches of ≤ 64 KB
+    P->>S: POST /api/notes
+    S-->>P: rendered notes, saved as they arrive
+  end
+  Note over P: PC unreachable? Keep reading the stored copy<br/>and resume the sync next time.
+```
 
 ## Quick start
 
