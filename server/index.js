@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Vault } from './vault.js';
+import { createTts } from './tts.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const configArg = process.argv.indexOf('--config');
@@ -29,9 +30,11 @@ for (const level of ['log', 'error']) {
 }
 
 const vault = new Vault({ root: path.resolve(ROOT, config.vault), exclude: config.exclude || [], lang });
+const tts = createTts({ root: ROOT, config: config.tts });
 const app = express();
 app.disable('x-powered-by');
-app.use(compression());
+// MP3 is already compressed, and gzip would hold back the streamed chunks.
+app.use(compression({ filter: (req, res) => !req.path.startsWith('/audio') && compression.filter(req, res) }));
 
 // The page and manifest carry the configured language and app name.
 const indexHtml = fs.readFileSync(path.join(ROOT, 'public', 'index.html'), 'utf8').replace('<html lang="en">', `<html lang="${lang}">`);
@@ -83,6 +86,10 @@ app.post('/api/notes', express.json({ limit: '256kb' }), async (req, res, next) 
     next(err);
   }
 });
+
+// Read-aloud audio for one note. Outside /api/ so the phone's service worker
+// can keep a downloaded copy for offline listening.
+app.get('/audio', (req, res, next) => tts(req, res, vault).catch(next));
 
 // Only files the index knows about are served, so excluded folders, dotfiles
 // and anything outside the vault are unreachable.

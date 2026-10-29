@@ -42,6 +42,7 @@ If you want to *read* your notes everywhere and keep writing on the desktop, thi
 - **Dataview without Dataview.** Common `LIST` / `TABLE` queries are evaluated on the server.
 - **Search** across titles, aliases, text and `#tags`, with CJK-friendly normalisation.
 - **Backlinks**, a contents sheet for long notes, breadcrumbs, recent notes.
+- **Read aloud.** ▶ Listen on any note: the PC turns it into speech with a neural voice and streams it while it's generated, with lock-screen controls. *Save for offline* keeps the audio on the phone.
 - **Light / dark / auto** themes and four text sizes.
 - **Private by default.** Binds to `127.0.0.1`; only your tailnet can reach it. Exclude folders such as `_private`; dotfiles, `.env` and `node_modules` are never served.
 
@@ -131,8 +132,23 @@ tailscale serve --bg --https=10443 http://127.0.0.1:4610
 | `tailscaleHttpsPort` | `10443` | HTTPS port on your tailnet (used by the Windows scripts) |
 | `lang` | `en` | Page language: picks CJK glyph variants and sort order (`ja`, `zh`, `ko`…) |
 | `appName` | `Vault` | Name shown on the home screen |
+| `tts` | – | Read-aloud options: `voiceEn`, `voiceJa`, `rate` (e.g. `"-5%"`), `python` (interpreter path). See below |
 
 Line breaks follow your vault's own *Strict line breaks* setting (`.obsidian/app.json`).
+
+## Read aloud
+
+Needs Python 3 on the PC with [edge-tts](https://github.com/rany2/edge-tts):
+
+```bash
+pip install edge-tts==7.3.1
+```
+
+edge-tts uses Microsoft Edge's online neural voices: free and unofficial, so it can change or stop working. Mostly-Japanese notes get `ja-JP-NanamiNeural`, everything else `en-US-AvaMultilingualNeural`. Code blocks, tables and emoji are skipped.
+
+- Text is sent in ~1,000-character pieces and the audio streams to the phone as it arrives. Long notes play right away, but after a burst Microsoft slows delivery to about speaking speed, so a long new note may pause briefly to buffer.
+- Finished audio is cached on the PC in `cache/tts/` and regenerated only when the note's text changes.
+- *Save for offline* stores a note's audio on the phone; *Settings → Read aloud* lists saved audio and deletes it.
 
 ## What renders
 
@@ -157,6 +173,7 @@ Line breaks follow your vault's own *Strict line breaks* setting (`.obsidian/app
 - Only Markdown, canvas, image, PDF and audio/video files are served, and only if they're in the index: folders in `exclude`, dot-folders and `node_modules` are unreachable by path.
 - Rendered HTML is sanitised: scripts, iframes, forms and event handlers are stripped.
 - The phone stores a copy of what's served. Use `exclude` for anything that should never leave the PC.
+- **Read aloud sends the note's text to Microsoft's speech service.** Nothing is sent unless you press ▶ Listen or *Save for offline*.
 
 ## Troubleshooting
 
@@ -167,9 +184,9 @@ Line breaks follow your vault's own *Strict line breaks* setting (`.obsidian/app
 ## Development
 
 ```
-server/   index.js (HTTP + API) · vault.js (index, links, embeds) · markdown.js (Obsidian syntax) · dataview.js
-public/   index.html · app.js (offline store, sync, views) · style.css · sw.js
-scripts/  make-icons.js (draws the PNG icons, no dependencies)
+server/   index.js (HTTP + API) · vault.js (index, links, embeds) · markdown.js (Obsidian syntax) · dataview.js · tts.js (read-aloud jobs)
+public/   index.html · app.js (offline store, sync, views, player) · style.css · sw.js
+scripts/  make-icons.js (draws the PNG icons, no dependencies) · tts.py (edge-tts streaming)
 example-vault/  demo content used by `npm run demo` and the screenshots
 ```
 

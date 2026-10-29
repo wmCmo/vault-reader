@@ -19,6 +19,9 @@ const ICON = {
   canvas: '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/><path d="M10 6.5h4a2 2 0 0 1 2 2V14"/></svg>',
   chevron: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>',
   search: '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>',
+  play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>',
+  pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>',
+  close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
 };
 
 // ---------- settings (per-device conveniences only) ----------
@@ -444,12 +447,15 @@ function renderNote(id, anchor) {
       <summary>Properties <span class="muted">${props.length}</span></summary>
       <dl>${props.map((p) => `<div class="prop"><dt>${esc(p.key)}</dt><dd>${p.html}</dd></div>`).join('')}</dl>
     </details>` : ''}
+    ${n.kind === 'md' ? '<div class="listen-row" id="listen-row"></div>' : ''}
     <div class="markdown">${n.html}</div>
     ${n.backlinks?.length ? `<section class="backlinks" id="backlinks">
       <h2 class="section-label">Linked mentions <span class="muted">${n.backlinks.length}</span></h2>
       <ul class="list card">${n.backlinks.map((b) => noteRow(state.notes.get(b.id) || { ...b, kind: 'md' })).join('')}</ul>
     </section>` : ''}
   </article>`;
+
+  if (n.kind === 'md') renderListenRow(n);
 
   const title = $('#note-title');
   titleObserver = new IntersectionObserver(([e]) => $('#topbar-title').classList.toggle('visible', !e.isIntersecting), {
@@ -574,8 +580,11 @@ async function renderSettings() {
       <span>Theme</span>${seg('theme', settings.theme || 'system', [['system', 'Auto'], ['light', 'Light'], ['dark', 'Dark']])}
       <span>Text size</span>${seg('textScale', settings.textScale || 1, [['0.9', 'S'], ['1', 'M'], ['1.12', 'L'], ['1.25', 'XL']])}
     </div>
+    <h2 class="section-label">Read aloud: saved on this phone</h2>
+    <div class="card pad" id="saved-audio"><p class="muted small">Checking…</p></div>
     <p class="muted small center">Read-only copy of <strong>${esc(state.vaultName)}</strong>. Edits happen in Obsidian on your PC.</p>
   </section>`;
+  renderSavedAudio();
   $('#sync-now').addEventListener('click', () => sync());
   $('#sync-full').addEventListener('click', () => sync({ full: true }));
   view.querySelectorAll('.segmented').forEach((el) =>
@@ -629,6 +638,164 @@ window.addEventListener('hashchange', render);
 document.addEventListener('visibilitychange', maybeSync);
 window.addEventListener('online', () => sync());
 setInterval(maybeSync, 5 * 60_000);
+
+// ---------- read aloud ----------
+// The PC turns a note into speech (server/tts.js) and streams it; playback goes
+// through a real <audio> element, so it keeps going with the screen off and
+// shows lock-screen controls. "Save for offline" keeps a full copy in Cache
+// Storage, which the service worker serves first; Settings lists and deletes them.
+
+const AUDIO_CACHE = 'vault-audio';
+const audioUrl = (n) => new URL(`audio?id=${encodeURIComponent(n.id)}&v=${encodeURIComponent(n.hash || '')}`, location.href).href;
+const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+const clock = (sec) => (Number.isFinite(sec) ? `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}` : '');
+const player = { bar: null, audio: null, note: null };
+
+function ensurePlayer() {
+  if (player.bar) return player;
+  const bar = document.createElement('div');
+  bar.className = 'player';
+  bar.hidden = true;
+  bar.innerHTML = `<button class="icon-btn" id="pl-toggle" aria-label="Play or pause">${ICON.pause}</button>
+    <a class="pl-title" id="pl-title"></a>
+    <span class="pl-time" id="pl-time"></span>
+    <button class="icon-btn" id="pl-close" aria-label="Stop">${ICON.close}</button>
+    <audio id="pl-audio" preload="none"></audio>`;
+  document.body.append(bar);
+  const audio = $('#pl-audio', bar);
+  const paint = () => {
+    $('#pl-toggle', bar).innerHTML = audio.paused ? ICON.play : ICON.pause;
+    const dur = Number.isFinite(audio.duration) ? ` / ${clock(audio.duration)}` : '';
+    if (!audio.error) $('#pl-time', bar).textContent = `${clock(audio.currentTime)}${dur}`;
+  };
+  for (const ev of ['play', 'pause', 'ended', 'timeupdate', 'durationchange']) audio.addEventListener(ev, paint);
+  audio.addEventListener('error', () => {
+    $('#pl-time', bar).textContent = "Couldn't load: connect to your PC, or save it for offline first";
+  });
+  $('#pl-toggle', bar).addEventListener('click', () => (audio.paused ? audio.play().catch(() => {}) : audio.pause()));
+  $('#pl-close', bar).addEventListener('click', stopListening);
+  if ('mediaSession' in navigator) {
+    const ms = navigator.mediaSession;
+    ms.setActionHandler('play', () => audio.play().catch(() => {}));
+    ms.setActionHandler('pause', () => audio.pause());
+    ms.setActionHandler('stop', stopListening);
+    ms.setActionHandler('seekbackward', () => (audio.currentTime = Math.max(0, audio.currentTime - 15)));
+    ms.setActionHandler('seekforward', () => (audio.currentTime += 15));
+  }
+  Object.assign(player, { bar, audio });
+  return player;
+}
+
+function listen(n) {
+  const { bar, audio } = ensurePlayer();
+  player.note = n;
+  const title = $('#pl-title', bar);
+  title.textContent = n.name;
+  title.href = noteHref(n.id);
+  bar.hidden = false;
+  document.body.classList.add('has-player');
+  audio.src = audioUrl(n);
+  $('#pl-time', bar).textContent = 'Preparing the voice…';
+  audio.play().catch(() => {});
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: n.name,
+      artist: state.vaultName,
+      artwork: [{ src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }],
+    });
+  }
+}
+
+function stopListening() {
+  if (!player.audio) return;
+  player.audio.pause();
+  player.audio.removeAttribute('src');
+  player.audio.load();
+  player.bar.hidden = true;
+  player.note = null;
+  document.body.classList.remove('has-player');
+  if ('mediaSession' in navigator) navigator.mediaSession.metadata = null;
+}
+
+async function savedAudioSize(n) {
+  try {
+    const res = await (await caches.open(AUDIO_CACHE)).match(audioUrl(n));
+    return res ? Number(res.headers.get('Content-Length')) || 0 : null;
+  } catch {
+    return null;
+  }
+}
+
+async function renderListenRow(n) {
+  const row = $('#listen-row');
+  if (!row) return;
+  const size = await savedAudioSize(n);
+  if ($('#listen-row') !== row) return;
+  row.innerHTML = `<button class="btn primary" id="listen">${ICON.play}<span>Listen</span></button>
+    ${size != null
+      ? `<span class="muted small">Saved for offline · ${mb(size)}</span>`
+      : '<button class="btn" id="save-audio">Save for offline</button>'}`;
+  $('#listen', row).addEventListener('click', () => listen(n));
+  $('#save-audio', row)?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    btn.disabled = true;
+    btn.textContent = 'Saving… (about a minute for a long note)';
+    try {
+      const res = await fetch(audioUrl(n));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      await (await caches.open(AUDIO_CACHE)).put(audioUrl(n), new Response(blob, {
+        headers: { 'Content-Type': 'audio/mpeg', 'Content-Length': String(blob.size) },
+      }));
+      renderListenRow(n);
+    } catch {
+      btn.disabled = false;
+      btn.textContent = "Couldn't save: connect to your PC and try again";
+    }
+  });
+}
+
+async function renderSavedAudio() {
+  const box = $('#saved-audio');
+  if (!box) return;
+  const entries = [];
+  try {
+    const cache = await caches.open(AUDIO_CACHE);
+    for (const req of await cache.keys()) {
+      const url = new URL(req.url);
+      const id = url.searchParams.get('id');
+      const res = await cache.match(req);
+      const note = state.notes.get(id);
+      entries.push({
+        url: req.url,
+        id,
+        name: note?.name || id,
+        size: Number(res?.headers.get('Content-Length')) || 0,
+        stale: !note || note.hash !== url.searchParams.get('v'),
+      });
+    }
+  } catch {}
+  if ($('#saved-audio') !== box) return;
+  if (!entries.length) {
+    box.innerHTML = '<p class="muted small">Nothing saved. Open a note and tap “Save for offline” to keep its audio on this phone.</p>';
+    return;
+  }
+  entries.sort((a, b) => collator.compare(a.name, b.name));
+  const total = entries.reduce((sum, e) => sum + e.size, 0);
+  box.innerHTML = `<ul class="audio-list">${entries.map((e, i) => `<li>
+      <a href="${noteHref(e.id)}">${esc(e.name)}</a>
+      <span class="muted small">${mb(e.size)}${e.stale ? ' · older version of the note' : ''}</span>
+      <button class="btn" data-del="${i}">Delete</button>
+    </li>`).join('')}</ul>
+    <div class="btn-row"><span class="muted small">${entries.length} saved · ${mb(total)}</span><button class="btn" id="del-all-audio">Delete all</button></div>`;
+  const remove = async (urls) => {
+    const cache = await caches.open(AUDIO_CACHE);
+    await Promise.all(urls.map((u) => cache.delete(u)));
+    renderSavedAudio();
+  };
+  box.querySelectorAll('[data-del]').forEach((b) => b.addEventListener('click', () => remove([entries[Number(b.dataset.del)].url])));
+  $('#del-all-audio', box).addEventListener('click', () => remove(entries.map((e) => e.url)));
+}
 
 // ---------- boot ----------
 

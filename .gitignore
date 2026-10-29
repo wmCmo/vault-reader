@@ -3,3 +3,4 @@ logs/
 config.json
 .playwright-mcp/
 .claude/
+cache/

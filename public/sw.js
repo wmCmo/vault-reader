@@ -1,6 +1,7 @@
 // App shell: stale-while-revalidate. Vault files: cache first, so images and
 // any PDF opened once keep working offline. /api/ always goes to the network.
-const SHELL = 'shell-v1';
+const SHELL = 'shell-v2';
+const AUDIO = 'vault-audio';
 const FILES = 'vault-files';
 const SHELL_URLS = [
   './', 'index.html', 'style.css', 'app.js', 'manifest.webmanifest',
@@ -46,12 +47,28 @@ async function fromFiles(request) {
   }
 }
 
+// Read-aloud audio: a copy saved with "Save for offline" first; otherwise the
+// live stream from the PC, passed through untouched (never cached half-done).
+async function fromAudio(request) {
+  const cached = await (await caches.open(AUDIO)).match(request.url);
+  if (cached) return cached;
+  try {
+    return await fetch(request);
+  } catch {
+    return offline('This audio has not been saved on the phone. Connect to your PC, or tap "Save for offline" first.');
+  }
+}
+
 self.addEventListener('fetch', (event) => {
   const { request } = event;
   const url = new URL(request.url);
   if (request.method !== 'GET' || url.origin !== self.location.origin) return;
   const path = url.pathname.slice(new URL(self.registration.scope).pathname.length);
   if (path.startsWith('api/')) return;
+  if (path === 'audio') {
+    event.respondWith(fromAudio(request));
+    return;
+  }
   if (path.startsWith('files/')) {
     if (!request.headers.has('range')) event.respondWith(fromFiles(request));
     return;

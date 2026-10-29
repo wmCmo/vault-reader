@@ -612,3 +612,34 @@ details[open] > summary .callout-fold { transform: rotate(90deg); }
 .hljs-deletion { color: var(--bad); }
 .hljs-emphasis { font-style: italic; }
 .hljs-strong { font-weight: 700; }
+
+/* ---------- read aloud ---------- */
+.listen-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 4px 0 18px; }
+.listen-row .btn { display: inline-flex; align-items: center; gap: 6px; }
+.listen-row .btn svg { width: 16px; height: 16px; fill: currentColor; }
+.player {
+  position: fixed;
+  left: 12px;
+  right: 12px;
+  bottom: calc(12px + env(safe-area-inset-bottom));
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.16);
+}
+.player[hidden] { display: none; }
+.player .icon-btn svg { width: 20px; height: 20px; stroke: currentColor; stroke-width: 2.4; fill: none; }
+.player .icon-btn svg path[d^="M8 5.5"] { fill: currentColor; stroke: none; }
+.pl-title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; color: inherit; text-decoration: none; }
+.pl-time { flex: none; max-width: 45%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 0.8em; color: var(--text-2); }
+body.has-player .view { padding-bottom: 84px; }
+body.has-player .toc-fab { bottom: calc(80px + env(safe-area-inset-bottom)); }
+.audio-list { list-style: none; margin: 0; padding: 0; }
+.audio-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.audio-list li a { flex: 1 1 100%; color: inherit; font-weight: 600; text-decoration: none; }
+.audio-list li .btn { height: 34px; margin-left: auto; }
