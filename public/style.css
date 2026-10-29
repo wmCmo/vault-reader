@@ -643,3 +643,38 @@ body.has-player .toc-fab { bottom: calc(80px + env(safe-area-inset-bottom)); }
 .audio-list li { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
 .audio-list li a { flex: 1 1 100%; color: inherit; font-weight: 600; text-decoration: none; }
 .audio-list li .btn { height: 34px; margin-left: auto; }
+
+/* ---------- rediscover ---------- */
+
+.label-with-action { display: flex; align-items: center; justify-content: space-between; }
+.link-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--link);
+  font: inherit;
+  letter-spacing: inherit;
+  cursor: pointer;
+}
+.link-btn:active { background: var(--surface-2); }
+.link-btn svg { width: 15px; height: 15px; }
+.btn.another { display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; margin-top: 2.4em; color: var(--text); }
+.btn.another svg { width: 18px; height: 18px; }
+.skip-folder { display: block; margin: 10px auto 0; font-size: 0.85em; }
+.skip-folder:disabled { color: var(--text-3); cursor: default; }
+.skip-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.skip-select {
+  width: 100%;
+  height: 42px;
+  margin-top: 12px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}

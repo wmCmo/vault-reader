@@ -22,6 +22,7 @@ const ICON = {
   play: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l10.5-6.5z"/></svg>',
   pause: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14"/></svg>',
   close: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>',
+  shuffle: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 4h4v4M4 20L20 4M20 16v4h-4M14 14l6 6M4 4l5 5"/></svg>',
 };
 
 // ---------- settings (per-device conveniences only) ----------
@@ -294,9 +295,16 @@ function currentRoute() {
 }
 
 let lastRendered = '';
+let lastNoteId = null;
 let depth = 0;
 function render() {
-  const route = currentRoute();
+  let route = currentRoute();
+  // #/random becomes the picked note's own URL, so Back skips the dice roll.
+  if (route.name === 'random') {
+    const [pick] = rediscover.pick(1, new Set([lastNoteId]));
+    history.replaceState(history.state, '', pick ? noteHref(pick.id) + '?r=1' : '#/');
+    route = currentRoute();
+  }
   if (history.state?.depth == null) history.replaceState({ ...history.state, depth: lastRendered ? depth + 1 : 0 }, '');
   depth = history.state.depth;
   closeToc();
@@ -307,7 +315,7 @@ function render() {
   titleObserver?.disconnect();
 
   if (!state.notes.size && route.name !== 'settings') renderEmpty();
-  else if (route.name === 'note') renderNote(route.arg, route.params.get('h'));
+  else if (route.name === 'note') renderNote(route.arg, route.params.get('h'), route.params.has('r'));
   else if (route.name === 'f') renderFolder(route.arg);
   else if (route.name === 'search') renderSearch(route.params.get('q') || '');
   else if (route.name === 'settings') renderSettings();
@@ -356,8 +364,8 @@ function setTopbarTitle(text) {
 
 // ---------- views ----------
 
-function noteRow(n, { showFolder = true, meta = '' } = {}) {
-  return `<li><a class="row" href="${noteHref(n.id)}">
+function noteRow(n, { showFolder = true, meta = '', href = noteHref(n.id) } = {}) {
+  return `<li><a class="row" href="${href}">
     <span class="row-icon">${n.kind === 'canvas' ? ICON.canvas : ICON.note}</span>
     <span class="row-main"><span class="row-title">${esc(n.name)}</span>${showFolder && n.folder ? `<span class="row-sub">${esc(n.folder)}</span>` : ''}</span>
     ${meta ? `<span class="row-meta">${meta}</span>` : ''}
@@ -390,15 +398,22 @@ function renderEmpty() {
 function renderHome() {
   $('#brand-name').textContent = state.vaultName;
   const recent = [...state.notes.values()].sort((a, b) => b.mtime - a.mtime).slice(0, 8);
+  const picks = rediscover.homePicks();
   const root = state.tree;
   view.innerHTML = `<section class="page home">
     <a class="search-launch" href="#/search">${ICON.search}<span>Search ${state.notes.size} notes</span></a>
     <h2 class="section-label">Recently edited</h2>
     <ul class="list card">${recent.map((n) => noteRow(n, { meta: ago(n.mtime) })).join('')}</ul>
+    ${picks.length ? `<h2 class="section-label label-with-action">Rediscover <button class="link-btn" id="reroll">${ICON.shuffle}<span>Shuffle</span></button></h2>
+    <ul class="list card">${picks.map((n) => noteRow(n, { meta: rediscover.seenLabel(n), href: noteHref(n.id) + '?r=1' })).join('')}</ul>` : ''}
     <h2 class="section-label">Folders</h2>
     <ul class="list card">${sortedFolders(root).map(folderRow).join('')}</ul>
     ${root.notes.length ? `<h2 class="section-label">Notes</h2><ul class="list card">${sortedNotes(root).map((n) => noteRow(n, { showFolder: false })).join('')}</ul>` : ''}
   </section>`;
+  $('#reroll')?.addEventListener('click', () => {
+    rediscover.reroll();
+    renderHome();
+  });
 }
 
 function crumbs(path, { includeLast = true } = {}) {
@@ -429,13 +444,15 @@ function renderFolder(path) {
   </section>`;
 }
 
-function renderNote(id, anchor) {
+function renderNote(id, anchor, fromRandom) {
   const n = state.notes.get(id);
+  lastNoteId = id;
   if (!n) {
     view.innerHTML = `<section class="page"><h1 class="page-title">Note not found</h1><p class="muted">${esc(id)}</p><p class="muted small">It may have been renamed or deleted on your PC.</p></section>`;
     return;
   }
   setTopbarTitle(n.name);
+  rediscover.markOpened(id);
   const props = n.props || [];
   const tags = n.tags || [];
   view.innerHTML = `<article class="page note" data-kind="${n.kind}">
@@ -453,7 +470,14 @@ function renderNote(id, anchor) {
       <h2 class="section-label">Linked mentions <span class="muted">${n.backlinks.length}</span></h2>
       <ul class="list card">${n.backlinks.map((b) => noteRow(state.notes.get(b.id) || { ...b, kind: 'md' })).join('')}</ul>
     </section>` : ''}
+    ${fromRandom ? `<a class="btn another" href="#/random">${ICON.shuffle}<span>Another random note</span></a>
+      ${n.folder ? `<button class="link-btn skip-folder" id="skip-folder">Don’t pick from “${esc(n.folder.split('/').pop())}” again</button>` : ''}` : ''}
   </article>`;
+  $('#skip-folder')?.addEventListener('click', (e) => {
+    rediscover.skipFolder(n.folder);
+    e.currentTarget.disabled = true;
+    e.currentTarget.textContent = 'Skipped. Undo in Settings.';
+  });
 
   if (n.kind === 'md') renderListenRow(n);
 
@@ -580,11 +604,14 @@ async function renderSettings() {
       <span>Theme</span>${seg('theme', settings.theme || 'system', [['system', 'Auto'], ['light', 'Light'], ['dark', 'Dark']])}
       <span>Text size</span>${seg('textScale', settings.textScale || 1, [['0.9', 'S'], ['1', 'M'], ['1.12', 'L'], ['1.25', 'XL']])}
     </div>
+    <h2 class="section-label">Random notes: folders to skip</h2>
+    <div class="card pad" id="random-skip"></div>
     <h2 class="section-label">Read aloud: saved on this phone</h2>
     <div class="card pad" id="saved-audio"><p class="muted small">Checking…</p></div>
     <p class="muted small center">Read-only copy of <strong>${esc(state.vaultName)}</strong>. Edits happen in Obsidian on your PC.</p>
   </section>`;
   renderSavedAudio();
+  renderRandomSkip();
   $('#sync-now').addEventListener('click', () => sync());
   $('#sync-full').addEventListener('click', () => sync({ full: true }));
   view.querySelectorAll('.segmented').forEach((el) =>
@@ -797,6 +824,99 @@ async function renderSavedAudio() {
   $('#del-all-audio', box).addEventListener('click', () => remove(entries.map((e) => e.url)));
 }
 
+// ---------- rediscover ----------
+// A random note, weighted towards ones not seen for a long time: "seen" is the
+// later of the last time it was opened on this phone and its last edit, so a
+// note you just wrote or just read rarely comes up. Open times live in the meta
+// store; they cover this phone only, not reading in Obsidian on the PC.
+
+const DAY = 864e5;
+const rediscover = {
+  opened: new Map(),
+  picks: [],
+  RECENT: 14 * DAY,
+  // Folders left out of random picks, per phone (Settings, or the button under a random note).
+  skipped(n) {
+    return (settings.randomSkip || []).some((f) => n.folder === f || n.folder?.startsWith(f + '/'));
+  },
+  skipFolder(folder) {
+    settings.randomSkip = [...new Set([...(settings.randomSkip || []), folder])];
+    saveSettings();
+  },
+  lastSeen(n) {
+    return Math.max(this.opened.get(n.id) || 0, n.mtime || 0);
+  },
+  seenLabel(n) {
+    const o = this.opened.get(n.id);
+    const ts = o && o >= n.mtime ? o : n.mtime;
+    const days = (Date.now() - ts) / DAY;
+    return `${ts === o ? 'read ' : ''}${days < 30 ? ago(ts) : days < 365 ? `${Math.round(days / 30)} mo ago` : `${Math.round(days / 365)} y ago`}`;
+  },
+  markOpened(id) {
+    this.opened.set(id, Date.now());
+    idb.set('opened', Object.fromEntries([...this.opened].filter(([k]) => state.notes.has(k)))).catch(() => {});
+  },
+  async load() {
+    this.opened = new Map(Object.entries((await idb.get('opened')) || {}));
+  },
+  // Weighted draw without replacement. Falls back to every note when the
+  // filters leave nothing, so a tiny vault still gets a pick.
+  pick(count, exclude = new Set()) {
+    const now = Date.now();
+    const all = [...state.notes.values()].filter((n) => n.kind === 'md' && !exclude.has(n.id) && !this.skipped(n));
+    // Under ~300 characters of text is a hub or stub note, not something to reread.
+    let pool = all.filter((n) => (n.text || '').length >= 300 && now - (this.opened.get(n.id) || 0) > this.RECENT);
+    if (!pool.length) pool = all;
+    const weighted = pool.map((n) => ({ n, w: 14 + Math.min(365, (now - this.lastSeen(n)) / DAY) }));
+    const out = [];
+    while (out.length < count && weighted.length) {
+      let r = Math.random() * weighted.reduce((sum, x) => sum + x.w, 0);
+      const i = weighted.findIndex((x) => (r -= x.w) <= 0);
+      out.push(weighted.splice(i < 0 ? weighted.length - 1 : i, 1)[0].n);
+    }
+    return out;
+  },
+  // Home keeps its three picks across re-renders; one you've opened is swapped out.
+  homePicks() {
+    const now = Date.now();
+    this.picks = this.picks.filter((id) => state.notes.has(id) && !this.skipped(state.notes.get(id)) && now - (this.opened.get(id) || 0) > this.RECENT);
+    if (this.picks.length < 3) this.picks.push(...this.pick(3 - this.picks.length, new Set(this.picks)).map((n) => n.id));
+    return this.picks.map((id) => state.notes.get(id));
+  },
+  reroll() {
+    this.picks = this.pick(3, new Set(this.picks)).map((n) => n.id);
+  },
+};
+
+function renderRandomSkip() {
+  const box = $('#random-skip');
+  if (!box) return;
+  const skip = settings.randomSkip || [];
+  const folders = new Set();
+  for (const n of state.notes.values()) {
+    const parts = (n.folder || '').split('/').filter(Boolean);
+    parts.forEach((_, i) => folders.add(parts.slice(0, i + 1).join('/')));
+  }
+  const options = [...folders].filter((f) => !skip.includes(f)).sort(collator.compare);
+  box.innerHTML = `${skip.length
+    ? `<ul class="audio-list">${skip.map((f, i) => `<li><span class="skip-name">${esc(f)}</span><button class="btn" data-unskip="${i}">Remove</button></li>`).join('')}</ul>`
+    : '<p class="muted small">Every folder can come up in random notes and Rediscover.</p>'}
+    <select class="skip-select" id="skip-add" aria-label="Skip a folder">
+      <option value="">Skip a folder…</option>
+      ${options.map((f) => `<option value="${esc(f)}">${esc(f)}</option>`).join('')}
+    </select>`;
+  box.querySelectorAll('[data-unskip]').forEach((b) => b.addEventListener('click', () => {
+    settings.randomSkip = skip.filter((_, i) => i !== Number(b.dataset.unskip));
+    saveSettings();
+    renderRandomSkip();
+  }));
+  $('#skip-add', box).addEventListener('change', (e) => {
+    if (!e.target.value) return;
+    rediscover.skipFolder(e.target.value);
+    renderRandomSkip();
+  });
+}
+
 // ---------- boot ----------
 
 (async function boot() {
@@ -806,6 +926,7 @@ async function renderSavedAudio() {
     for (const n of await idb.allNotes()) state.notes.set(n.id, n);
     state.lastSync = (await idb.get('lastSync')) || null;
     state.vaultName = (await idb.get('vaultName')) || state.vaultName;
+    await rediscover.load();
   } catch (err) {
     state.error = `Couldn't open storage on this phone (${err.message})`;
   }

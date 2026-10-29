@@ -42,6 +42,7 @@ If you want to *read* your notes everywhere and keep writing on the desktop, thi
 - **Dataview without Dataview.** Common `LIST` / `TABLE` queries are evaluated on the server.
 - **Search** across titles, aliases, text and `#tags`, with CJK-friendly normalisation.
 - **Backlinks**, a contents sheet for long notes, breadcrumbs, recent notes.
+- **Random notes.** The shuffle button and the *Rediscover* list on Home pick notes you haven't opened or edited in a while; short hub notes and folders you skip in Settings are left out.
 - **Read aloud.** ▶ Listen on any note: the PC turns it into speech with a neural voice and streams it while it's generated, with lock-screen controls. *Save for offline* keeps the audio on the phone.
 - **Light / dark / auto** themes and four text sizes.
 - **Private by default.** Binds to `127.0.0.1`; only your tailnet can reach it. Exclude folders such as `_private`; dotfiles, `.env` and `node_modules` are never served.
