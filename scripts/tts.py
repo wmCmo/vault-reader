@@ -3,11 +3,15 @@
 Usage: python tts.py <voice> [rate]   e.g. python tts.py en-US-AvaMultilingualNeural -5%
 Called by server/tts.js; needs `pip install edge-tts`.
 
-Long text is sent in ~1,000-character chunks, one request each: a single
-request for a whole note stalls partway on the service side and never ends.
+Long text is sent in ~400-character chunks, one request each. When the service
+throttles (after a burst it streams at speaking speed), it stops each request
+after about 60 seconds of audio and never ends it, so a chunk has to stay well
+under a minute of speech, Japanese included.
 Each chunk gets a timeout and retries, so a stall costs seconds, not the note.
-Audio goes out frame by frame, so a retry after a partial piece repeats that
-piece's opening; rare, and better than holding a whole piece back.
+A retry resumes where the stalled request stopped: the audio is constant-bitrate,
+so two renders of the same text line up byte for byte in time.
+The next chunk is fetched while the current one plays, so the gap between
+chunks (the service takes 3-8 s to start one when throttled) isn't heard.
 """
 import asyncio
 import os
@@ -17,10 +21,11 @@ import time
 
 import edge_tts
 
-CHUNK = 1000
-STALL = 10  # seconds without a new frame before a chunk is retried (a healthy chunk starts in 1-2 s)
+CHUNK = 400
+STALL = 30  # seconds without a new frame before a chunk is retried; when throttled, the service pauses up to ~20 s mid-chunk and then carries on
 TAIL = 4  # seconds of quiet after the last word that count as "finished"
 ATTEMPTS = 3
+AHEAD = 3  # chunks generated at once: throttled, each arrives slower than speaking speed, so several run side by side
 
 
 def chunks(text):
@@ -47,6 +52,12 @@ def last_word(part):
     return words[-1].lower() if words else ""
 
 
+class Stalled(Exception):
+    def __init__(self, written):
+        super().__init__(f"stalled before the last word ({written} bytes already sent)")
+        self.written = written
+
+
 async def next_frame(it, timeout):
     """Next frame, or None on a stall. A stalled request is abandoned, never
     cancelled: cancelling it hangs inside the websocket's own cleanup."""
@@ -57,14 +68,14 @@ async def next_frame(it, timeout):
     return task.result()  # raises StopAsyncIteration at the end
 
 
-async def speak(part, voice, rate, out):
+async def speak(part, voice, rate, sink, skip=0):
     # The service sometimes delivers all the audio and then never sends its
     # end-of-turn message. Word boundaries tell us when the last word has been
     # spoken; after that, a short quiet spell means the chunk is complete.
     # The last word alone isn't proof (it can appear earlier in the chunk), so it
     # only counts once nearly every word has had its boundary.
-    # Audio is written the moment it arrives: when the service slows to speaking
-    # speed, the phone plays along instead of waiting for the whole piece.
+    # Audio is passed on the moment it arrives. `skip` drops the bytes a stalled
+    # earlier attempt already delivered, so a retry continues instead of repeating.
     written = 0
     target, heard_last = last_word(part), False
     total, heard = word_count(part), 0
@@ -79,17 +90,54 @@ async def speak(part, voice, rate, out):
         if frame is None:
             if heard_last and written:
                 return stats("quiet after last word")
-            raise TimeoutError(f"stalled before the last word ({written} bytes already sent)")
+            raise Stalled(written)
         if first is None:
             first = time.monotonic() - started
         if frame["type"] == "audio":
-            out.write(frame["data"])
-            out.flush()
-            written += len(frame["data"])
+            data = frame["data"]
+            if written < skip:
+                data = data[skip - written:]
+                written = min(written + len(frame["data"]), skip)
+            if data:
+                sink(data)
+                written += len(data)
         elif frame["type"] == "WordBoundary":
             heard += 1
             if heard >= total * 0.9 and target and target in frame["text"].lower():
                 heard_last = True
+
+
+class Piece:
+    def __init__(self):
+        self.buf = bytearray()
+        self.done = False
+        self.error = None
+        self.changed = asyncio.Event()
+
+    def add(self, data):
+        self.buf += data
+        self.changed.set()
+
+
+async def render(i, n, part, voice, rate, piece, slots):
+    async with slots:
+        try:
+            for attempt in range(1, ATTEMPTS + 1):
+                try:
+                    st = await speak(part, voice, rate, piece.add, skip=len(piece.buf))
+                    print(f"piece {i}/{n}: {st['secs']:.1f}s, first frame {st['first']:.1f}s, "
+                          f"{len(part)} chars, ended by {st['how']}", file=sys.stderr, flush=True)
+                    return
+                except Exception as err:  # noqa: BLE001
+                    print(f"piece {i}/{n} attempt {attempt}/{ATTEMPTS} failed: {err!r}", file=sys.stderr, flush=True)
+                    if attempt == ATTEMPTS:
+                        raise
+                    await asyncio.sleep(2 * attempt)
+        except Exception as err:  # noqa: BLE001
+            piece.error = err
+        finally:
+            piece.done = True
+            piece.changed.set()
 
 
 async def main():
@@ -98,18 +146,26 @@ async def main():
     text = sys.stdin.buffer.read().decode("utf-8")
     out = sys.stdout.buffer
     parts = chunks(text)
-    for i, part in enumerate(parts, 1):
-        for attempt in range(1, ATTEMPTS + 1):
-            try:
-                st = await speak(part, voice, rate, out)
-                print(f"piece {i}/{len(parts)}: {st['secs']:.1f}s, first frame {st['first']:.1f}s, "
-                      f"{len(part)} chars, ended by {st['how']}", file=sys.stderr, flush=True)
+    pieces = [Piece() for _ in parts]
+    # Slots are taken in order, so a chunk only starts once the one two back is done.
+    slots = asyncio.Semaphore(AHEAD)
+    for i, (part, piece) in enumerate(zip(parts, pieces), 1):
+        asyncio.ensure_future(render(i, len(parts), part, voice, rate, piece, slots))
+        await asyncio.sleep(0)
+    # Play the chunks in order, each one as it arrives.
+    for piece in pieces:
+        sent = 0
+        while True:
+            piece.changed.clear()
+            if len(piece.buf) > sent:
+                out.write(piece.buf[sent:])
+                out.flush()
+                sent = len(piece.buf)
+            if piece.done:
                 break
-            except Exception as err:  # noqa: BLE001
-                print(f"piece {i}/{len(parts)} attempt {attempt}/{ATTEMPTS} failed: {err!r}", file=sys.stderr, flush=True)
-                if attempt == ATTEMPTS:
-                    raise
-                await asyncio.sleep(2 * attempt)
+            await piece.changed.wait()
+        if piece.error:
+            raise piece.error
     # Exit from inside the loop: asyncio.run's teardown would wait on any
     # abandoned request and hang.
     out.flush()
