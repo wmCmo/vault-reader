@@ -4,3 +4,4 @@ config.json
 .playwright-mcp/
 .claude/
 cache/
+__pycache__/
