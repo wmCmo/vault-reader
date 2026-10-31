@@ -676,7 +676,7 @@ const AUDIO_CACHE = 'vault-audio';
 const audioUrl = (n) => new URL(`audio?id=${encodeURIComponent(n.id)}&v=${encodeURIComponent(n.hash || '')}`, location.href).href;
 const mb = (bytes) => `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 const clock = (sec) => (Number.isFinite(sec) ? `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, '0')}` : '');
-const player = { bar: null, audio: null, note: null };
+const player = { bar: null, audio: null, note: null, waitingSince: null, tick: null };
 
 function ensurePlayer() {
   if (player.bar) return player;
@@ -691,12 +691,40 @@ function ensurePlayer() {
   document.body.append(bar);
   const audio = $('#pl-audio', bar);
   const paint = () => {
+    const loading = player.waitingSince != null;
+    bar.classList.toggle('loading', loading);
     $('#pl-toggle', bar).innerHTML = audio.paused ? ICON.play : ICON.pause;
+    if (audio.error) return;
+    if (loading) {
+      // A counter, so a slow start reads as progress rather than a freeze.
+      // First audio usually takes 2-8 s; mid-note waits are the PC catching up.
+      const secs = Math.floor((Date.now() - player.waitingSince) / 1000);
+      const what = audio.currentTime > 0 ? 'Buffering' : 'Preparing';
+      $('#pl-time', bar).textContent = `${what}… ${secs}s`;
+      return;
+    }
     const dur = Number.isFinite(audio.duration) ? ` / ${clock(audio.duration)}` : '';
-    if (!audio.error) $('#pl-time', bar).textContent = `${clock(audio.currentTime)}${dur}`;
+    $('#pl-time', bar).textContent = `${clock(audio.currentTime)}${dur}`;
   };
+  const startWaiting = () => {
+    if (player.waitingSince == null) player.waitingSince = Date.now();
+    clearInterval(player.tick);
+    player.tick = setInterval(paint, 1000);
+    paint();
+  };
+  const stopWaiting = () => {
+    player.waitingSince = null;
+    clearInterval(player.tick);
+    paint();
+  };
+  player.startWaiting = startWaiting;
+  player.stopWaiting = stopWaiting;
   for (const ev of ['play', 'pause', 'ended', 'timeupdate', 'durationchange']) audio.addEventListener(ev, paint);
+  audio.addEventListener('waiting', () => !audio.paused && startWaiting());
+  audio.addEventListener('playing', stopWaiting);
+  audio.addEventListener('pause', () => audio.paused && stopWaiting());
   audio.addEventListener('error', () => {
+    stopWaiting();
     $('#pl-time', bar).textContent = "Couldn't load: connect to your PC, or save it for offline first";
   });
   $('#pl-toggle', bar).addEventListener('click', () => (audio.paused ? audio.play().catch(() => {}) : audio.pause()));
@@ -721,9 +749,10 @@ function listen(n) {
   title.href = noteHref(n.id);
   bar.hidden = false;
   document.body.classList.add('has-player');
+  player.stopWaiting();
   audio.src = audioUrl(n);
-  $('#pl-time', bar).textContent = 'Preparing the voice…';
-  audio.play().catch(() => {});
+  player.startWaiting();
+  audio.play().catch(() => player.stopWaiting());
   if ('mediaSession' in navigator) {
     navigator.mediaSession.metadata = new MediaMetadata({
       title: n.name,
@@ -736,6 +765,7 @@ function listen(n) {
 function stopListening() {
   if (!player.audio) return;
   player.audio.pause();
+  player.stopWaiting();
   player.audio.removeAttribute('src');
   player.audio.load();
   player.bar.hidden = true;

@@ -1,6 +1,6 @@
 // App shell: stale-while-revalidate. Vault files: cache first, so images and
 // any PDF opened once keep working offline. /api/ always goes to the network.
-const SHELL = 'shell-v2';
+const SHELL = 'shell-v3';
 const AUDIO = 'vault-audio';
 const FILES = 'vault-files';
 const SHELL_URLS = [
